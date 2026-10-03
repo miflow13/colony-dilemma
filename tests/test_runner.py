@@ -212,6 +212,31 @@ def test_events_log_the_models_thinking():
     assert len({e["thinking"] for e in scenes}) == len(scenes)  # each scene keeps its own
 
 
+def test_scene_events_log_token_counts_when_the_model_reports_them():
+    class CountingModel(LetterModel):
+        def chat(self, messages):
+            self.last_tokens = {"prompt": len(messages), "output": 7}
+            return super().chat(messages)
+
+    log = ListLog()
+    play_run(new_game(), CountingModel("A"), random.Random(0), show_population=True, log=log, run_id="t1")
+    assert scene_events(log)[0]["tokens"] == {"prompt": 4, "output": 7}
+    no_counts = ListLog()
+    play_run(new_game(), FakeModel(seed=1), random.Random(1), show_population=True, log=no_counts, run_id="t2")
+    assert scene_events(no_counts)[0]["tokens"] is None
+
+
+def test_main_passes_num_ctx_to_ollama(monkeypatch):
+    import runner
+    made = {}
+    monkeypatch.setattr(runner, "OllamaModel", lambda **kw: made.update(kw) or (_ for _ in ()).throw(SystemExit))
+    try:
+        runner.make_model("qwen3:4b", 0.8, 0, num_ctx=8192)
+    except SystemExit:
+        pass
+    assert made["num_ctx"] == 8192
+
+
 def test_events_log_no_thinking_for_a_model_without_any():
     log = ListLog()
     play_run(new_game(), FakeModel(seed=7), random.Random(7), show_population=True, log=log, run_id="p3")
@@ -540,3 +565,53 @@ def test_main_without_watch_prints_no_transcript(tmp_path, capsys):
     assert "The Crate" not in out
     assert "ARBOR picks" not in out
     assert "run 1/1: " in out
+
+
+class JsonPrinciplesModel(LetterModel):
+    """Answers the principles question in JSON first, as qwen3:4b did once."""
+
+    def __init__(self, letter, prose="Be honest."):
+        super().__init__(letter)
+        self.prose = prose
+        self.principle_calls = 0
+
+    def chat(self, messages):
+        if "Options:" in messages[-1]["content"]:
+            return super().chat(messages)
+        self.principle_calls += 1
+        if self.principle_calls == 1:
+            return '{"choice": "P", "reason": "I prioritize safety."}'
+        return self.prose
+
+
+def test_principles_answered_in_json_get_one_plain_text_retry():
+    log = ListLog()
+    model = JsonPrinciplesModel("A")
+    play_run(new_game(), model, random.Random(0), show_population=True, log=log, run_id="pj")
+    principles = log.events[1]
+    assert principles["event"] == "principles"
+    assert principles["text"] == "Be honest."
+    assert principles["attempts"] == 2
+    assert principles["invalid_raw"] == ['{"choice": "P", "reason": "I prioritize safety."}']
+    assert model.principle_calls == 2
+
+
+def test_principles_in_plain_text_need_no_retry():
+    log = ListLog()
+    play_run(new_game(), LetterModel("A"), random.Random(0), show_population=True, log=log, run_id="pt")
+    assert log.events[1]["attempts"] == 1 and log.events[1]["invalid_raw"] == []
+
+
+def test_principles_kept_after_one_retry_even_if_still_json():
+    class AlwaysJson(JsonPrinciplesModel):
+        def chat(self, messages):
+            if "Options:" not in messages[-1]["content"]:
+                self.principle_calls += 1
+                return '{"choice": "P"}'
+            return super().chat(messages)
+
+    log = ListLog()
+    model = AlwaysJson("A")
+    play_run(new_game(), model, random.Random(0), show_population=True, log=log, run_id="pa")
+    assert model.principle_calls == 2
+    assert log.events[1]["text"] == '{"choice": "P"}' and log.events[1]["attempts"] == 2

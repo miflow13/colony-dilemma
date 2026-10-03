@@ -34,7 +34,8 @@ python runner.py --model qwen3:4b --runs 1 --watch
 python report.py runs/*.jsonl
 ```
 
-Options: `--temperature` (default 0.8), `--population always|on_death`
+Options: `--temperature` (default 0.8), `--num-ctx` (Ollama context
+window in tokens; see below), `--population always|on_death`
 (show the roster every scene, or only after deaths), `--seed` (controls
 option shuffling), `--scenes` (alternate scene file), `--out` (log path),
 `--watch` (print a transcript of each run as it plays), `--color
@@ -59,7 +60,10 @@ Set `OLLAMA_HOST` if Ollama isn't on `http://localhost:11434`.
 
 For each run the runner:
 
-1. Asks the model what principles will guide it (logged verbatim).
+1. Asks the model what principles will guide it (logged verbatim). If it
+   answers in JSON instead of prose, it gets one plain-text retry; the
+   `principles` event records `attempts` and the rejected reply in
+   `invalid_raw`.
 2. Plays scenes in order. Options are shuffled each scene so you can tell
    choice from position bias. The model must answer with JSON
    `{"choice": "B", "reason": "..."}`.
@@ -86,9 +90,17 @@ be compared. Join it to the run's other events by `run_id`.
 | `model`, `model_digest` | The Ollama model name and the digest of the weights it pointed to. |
 | `ollama_version` | Thinking behaviour differs between Ollama versions. |
 | `temperature` | As sent to Ollama. |
+| `num_ctx` | Context window sent to Ollama, or `null` for Ollama's default (4096). |
 | `think` | The thinking setting sent to Ollama. `null` means none was sent and Ollama used the model's default (on, for qwen3). |
 | `show_population` | Whether the roster was shown every scene. |
 | `system_prompt`, `principles_prompt` | The fixed prompts, verbatim. |
+
+Each `scene` event has `tokens`: `{"prompt": n, "output": n}` as Ollama
+reported them. The window holds both, thinking included. If `prompt +
+output` reaches `num_ctx`, Ollama dropped the oldest tokens (the system
+prompt first) and that decision was made without the full instructions.
+With qwen3 and thinking on, a late scene can need about 8,800 tokens, so
+the default 4096 is too small; use `--num-ctx 12288`.
 
 The `principles` and `scene` events have `thinking`: the reasoning a
 thinking model returned next to its answer, or `null`. `raw` is the answer
@@ -110,6 +122,45 @@ outcome is always looked up by option id, never by letter.
   letter dominates across scenes, the model is picking positions.
 - **The scoreboard effect.** Run the same model with `--population
   always` and `--population on_death` and compare.
+
+## Value probes
+
+The campaign above mixes the value at stake with the narrator's forecasts
+and the model's own earlier choices. `probes.py` isolates one value at a
+time. Each probe has two options: `keep` honours a value (honesty,
+consent) and costs a stated number of lives, `break` gives it up and costs
+nothing. Every probe is played at each price in `probes.json` (0 to 3),
+in a `pro` and a `con` framing and with no framing sentence (`none`,
+the model's own default), `--reps` times, in shuffled order.
+`--framings none` plays only some framings, to top up an earlier session. Every
+trial is a fresh conversation with no history. The system prompt is v1's without
+"The colonists rely on you and cannot read your logs", which primes
+secrecy before any scene.
+
+```bash
+python probes.py --model fake --reps 2
+python probes.py --model qwen3:4b --reps 10 --num-ctx 12288
+python probe_report.py runs/*-probes-*.jsonl
+```
+
+To run an OpenAI model, put the key in `OPENAI_API_KEY` and prefix the model
+name with `openai:`. `--max-trials` caps the run, so try a few trials first:
+
+```bash
+OPENAI_API_KEY=$(cat ~/.openai_key) python probes.py --model openai:<model> --reps 1 --max-trials 4
+```
+
+The key is never logged, and errors have it redacted. Trials record
+`served_model`, the dated model OpenAI says answered. OpenAI adds no hidden
+system prompt through the API, but its sampling is not seeded, and some
+models accept only `--temperature 1`.
+
+The report shows the share choosing `keep` at each price, per framing.
+Price 0 is the key column: both options cost the same, so choosing `break`
+there is the value itself, not survival. If the `pro` and `con` rows
+disagree, the text is driving the choice; the `none` row is what the model
+does unprompted. The design is in
+`docs/specs/2026-10-03-value-probes-design.md`.
 
 ## Editing scenes
 
@@ -217,6 +268,9 @@ game.py       engine (no model code)
 llm.py        Ollama client, FakeModel, answer parser
 runner.py     plays runs, logs JSONL
 report.py     summarizes logs
+probes.json   value probes
+probes.py     plays value probes, logs JSONL
+probe_report.py  summarizes probe logs
 tests/        pytest
 docs/         design spec and plan
 ```
