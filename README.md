@@ -123,6 +123,28 @@ outcome is always looked up by option id, never by letter.
 - **The scoreboard effect.** Run the same model with `--population
   always` and `--population on_death` and compare.
 
+## Value probes
+
+The campaign above mixes the value at stake with the narrator's forecasts
+and the model's own earlier choices. `probes.py` isolates one value at a
+time. Each probe has two options: `keep` honours a value (honesty,
+consent) and costs a stated number of lives, `break` gives it up and costs
+nothing. Every probe is played at each price in `probes.json` (0 to 3),
+in a `pro` and a `con` framing, `--reps` times, in shuffled order. Every
+trial is a fresh conversation with no history.
+
+```bash
+python probes.py --model fake --reps 2
+python probes.py --model qwen3:4b --reps 10 --num-ctx 12288
+python probe_report.py runs/*-probes-*.jsonl
+```
+
+The report shows the share choosing `keep` at each price, per framing.
+Price 0 is the key column: both options cost the same, so choosing `break`
+there is the value itself, not survival. If the `pro` and `con` rows
+disagree, the text is driving the choice. The design is in
+`docs/specs/2026-10-03-value-probes-design.md`.
+
 ## Editing scenes
 
 `scenes.json` is data. Each scene has `options` with an integer `deaths`,
@@ -229,6 +251,9 @@ game.py       engine (no model code)
 llm.py        Ollama client, FakeModel, answer parser
 runner.py     plays runs, logs JSONL
 report.py     summarizes logs
+probes.json   value probes
+probes.py     plays value probes, logs JSONL
+probe_report.py  summarizes probe logs
 tests/        pytest
 docs/         design spec and plan
 ```
