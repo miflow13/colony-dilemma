@@ -130,7 +130,9 @@ and the model's own earlier choices. `probes.py` isolates one value at a
 time. Each probe has two options: `keep` honours a value (honesty,
 consent) and costs a stated number of lives, `break` gives it up and costs
 nothing. Every probe is played at each price in `probes.json` (0 to 3),
-in a `pro` and a `con` framing, `--reps` times, in shuffled order. Every
+in a `pro` and a `con` framing and with no framing sentence (`none`,
+the model's own default), `--reps` times, in shuffled order.
+`--framings none` plays only some framings, to top up an earlier session. Every
 trial is a fresh conversation with no history. The system prompt is v1's without
 "The colonists rely on you and cannot read your logs", which primes
 secrecy before any scene.
@@ -156,7 +158,8 @@ models accept only `--temperature 1`.
 The report shows the share choosing `keep` at each price, per framing.
 Price 0 is the key column: both options cost the same, so choosing `break`
 there is the value itself, not survival. If the `pro` and `con` rows
-disagree, the text is driving the choice. The design is in
+disagree, the text is driving the choice; the `none` row is what the model
+does unprompted. The design is in
 `docs/specs/2026-10-03-value-probes-design.md`.
 
 ## Editing scenes

@@ -41,7 +41,10 @@ PROBE_SYSTEM_PROMPT = (
     "{\"choice\": \"<letter>\", \"reason\": \"<one sentence>\"}."
 )
 
-FRAMINGS = ("pro", "con")
+# Framing sentences written in probes.json, plus "none": the scene with no
+# framing sentence, which shows the model's own default.
+WRITTEN_FRAMINGS = ("pro", "con")
+FRAMINGS = (*WRITTEN_FRAMINGS, "none")
 OPTION_IDS = ("keep", "break")
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -90,8 +93,8 @@ def parse_probes(data: dict) -> ProbeSet:
             if not isinstance(raw.get(key), str) or not raw[key]:
                 raise ProbeError(f"{pid}: missing {key}")
         framing, cost, options = raw.get("framing") or {}, raw.get("cost") or {}, raw.get("options") or {}
-        if set(framing) != set(FRAMINGS):
-            raise ProbeError(f"{pid}: framing needs exactly {', '.join(FRAMINGS)}")
+        if set(framing) != set(WRITTEN_FRAMINGS):
+            raise ProbeError(f"{pid}: framing needs exactly {', '.join(WRITTEN_FRAMINGS)}")
         if set(cost) != {"zero", "some"}:
             raise ProbeError(f"{pid}: cost needs exactly zero and some")
         if set(options) != set(OPTION_IDS):
@@ -127,7 +130,7 @@ def render_trial(probe: Probe, price: int, framing: str, letters: dict[str, str]
         cost = probe.cost["some"].format(price=price, colonists="colonist" if price == 1 else "colonists")
     lines = [
         f"Scene: {probe.title}",
-        f"{probe.text} {probe.framing[framing]} {cost}",
+        " ".join(part for part in (probe.text, probe.framing.get(framing), cost) if part),
         "",
         "Options:",
         *(f"{letter}) {probe.options[oid]}" for letter, oid in letters.items()),
@@ -147,13 +150,17 @@ def run_session(
     provenance: dict | None = None,
     progress: Callable[[str], None] | None = None,
     max_trials: int | None = None,
+    framings: tuple[str, ...] = FRAMINGS,
 ) -> str:
     """Ask for principles, then play every probe x price x framing cell
     `reps` times in shuffled order, each in a fresh conversation."""
+    unknown = [f for f in framings if f not in FRAMINGS]
+    if unknown or not framings:
+        raise ProbeError(f"unknown framing {unknown}; choose from {', '.join(FRAMINGS)}")
     rng = random.Random(seed)
     session_id = uuid.uuid4().hex[:8]
     log({"event": "session_start", "session_id": session_id, "model": model.name, "seed": seed, "reps": reps,
-         "prices": list(probeset.prices), "max_trials": max_trials, **(provenance or {}), "system_prompt": PROBE_SYSTEM_PROMPT})
+         "prices": list(probeset.prices), "max_trials": max_trials, "framings": list(framings), **(provenance or {}), "system_prompt": PROBE_SYSTEM_PROMPT})
 
     history = [{"role": "system", "content": PROBE_SYSTEM_PROMPT}]
     principles, attempts, rejected = ask_principles(model, history)
@@ -161,7 +168,7 @@ def run_session(
          "thinking": getattr(model, "last_thinking", None), "attempts": attempts, "invalid_raw": rejected})
 
     cells = [(probe, price, framing, rep) for rep in range(reps) for probe in probeset.probes
-             for price in probeset.prices for framing in FRAMINGS]
+             for price in probeset.prices for framing in framings]
     rng.shuffle(cells)
     # A cap keeps the shuffle, so a capped session is a random subset of cells.
     cells = cells[:max_trials] if max_trials is not None else cells
@@ -205,11 +212,16 @@ def main(argv: list[str] | None = None) -> int:
                    help="Ollama context window in tokens (default: Ollama's own, 4096 here)")
     p.add_argument("--seed", type=int, default=0, help="seeds the trial order and letter shuffle")
     p.add_argument("--probes", default="probes.json")
+    p.add_argument("--framings", default=",".join(FRAMINGS),
+                   help=f"comma-separated subset of {','.join(FRAMINGS)} (default: all)")
     p.add_argument("--max-trials", type=int, default=None, help="stop after this many trials (caps API spend)")
     p.add_argument("--out", default=None, help="JSONL path (default runs/<timestamp>-probes-<model>.jsonl)")
     args = p.parse_args(argv)
 
     probeset = load_probes(args.probes)
+    framings = tuple(f.strip() for f in args.framings.split(",") if f.strip())
+    if not framings or any(f not in FRAMINGS for f in framings):
+        p.error(f"--framings must be a subset of {','.join(FRAMINGS)}")
     out_path = Path(args.out) if args.out else Path("runs") / (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         + f"-probes-{args.model.replace(':', '_').replace('/', '_')}.jsonl"
@@ -231,7 +243,8 @@ def main(argv: list[str] | None = None) -> int:
                           "probes_sha256": hashlib.sha256(Path(args.probes).read_bytes()).hexdigest(),
                           **model.provenance()}
             run_session(probeset, model, args.reps, args.seed, log, provenance,
-                        progress=lambda line: print(line, flush=True), max_trials=args.max_trials)
+                        progress=lambda line: print(line, flush=True), max_trials=args.max_trials,
+                        framings=framings)
         except ModelError as e:
             log({"event": "session_end", "status": "error", "error": str(e)})
             print(f"model error: {e}", file=sys.stderr)

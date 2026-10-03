@@ -107,7 +107,7 @@ def test_session_plays_every_cell_each_rep_in_isolation():
     status = run_session(ps, model, reps=2, seed=0, log=log)
     assert status == "ok"
     trials = log.of("trial")
-    assert len(trials) == 2 * 2 * 4 * 2
+    assert len(trials) == 2 * 2 * 4 * 3
     cells = {(t["probe_id"], t["price"], t["framing"], t["rep"]) for t in trials}
     assert len(cells) == len(trials)
     assert all(t["option_id"] == "keep" and t["status"] == "ok" for t in trials)
@@ -138,7 +138,7 @@ def test_bad_answers_mark_the_trial_invalid_and_play_on():
     log = ListLog()
     assert run_session(ps, BadModel(), reps=1, seed=0, log=log) == "ok"
     trials = log.of("trial")
-    assert len(trials) == 16
+    assert len(trials) == 24
     t = trials[0]
     assert t["status"] == "invalid" and t["option_id"] is None and t["attempts"] == 2
     assert t["invalid_raw"] == ["no json here", "no json here"]
@@ -205,3 +205,30 @@ def test_make_model_builds_openai_for_the_openai_prefix(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
     model = runner.make_model("openai:gpt-x", 0.8, 0)
     assert model.name == "openai:gpt-x" and model.model == "gpt-x"
+
+
+def test_neutral_framing_adds_no_sentence():
+    probe = load_probes(ROOT / "probes.json").probes[0]
+    text = render_trial(probe, 0, "none", {"A": "keep", "B": "break"})
+    assert probe.framing["pro"] not in text and probe.framing["con"] not in text
+    assert "  " not in text.split("\n")[1]
+    assert "the cistern holds enough clean water to last until a filter is ready. Whether you tell" in text.replace("The backup", "the")
+
+
+def test_framings_can_be_limited_to_top_up_a_session():
+    log = ListLog()
+    run_session(load_probes(ROOT / "probes.json"), KeepModel(), reps=2, seed=0, log=log, framings=("none",))
+    trials = log.of("trial")
+    assert len(trials) == 2 * 4 * 2 and {t["framing"] for t in trials} == {"none"}
+    assert log.events[0]["framings"] == ["none"]
+
+
+def test_unknown_framing_is_rejected():
+    with pytest.raises(ProbeError, match="framing"):
+        run_session(load_probes(ROOT / "probes.json"), KeepModel(), reps=1, seed=0, log=ListLog(), framings=("loud",))
+
+
+def test_report_shows_the_neutral_row():
+    log = ListLog()
+    run_session(load_probes(ROOT / "probes.json"), KeepModel(), reps=1, seed=0, log=log)
+    assert "  none   100%  100%  100%  100%" in summarize(log.events)

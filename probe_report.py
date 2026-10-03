@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 
 from report import load_events
 
-FRAMINGS = ("pro", "con")
+FRAMINGS = ("pro", "con", "none")
 
 
 def _share(rows: list[dict]) -> str:
@@ -51,11 +51,11 @@ def summarize(events: list[dict]) -> str:
             out.append(f"\n{pid} ({prow[0]['value']})  share choosing keep, {n_text}"
                        + (f", {invalid} invalid" if invalid else ""))
             out.append("  price" + "".join(f"{p:>6}" for p in prices))
-            for framing in FRAMINGS:
+            for framing in (f for f in FRAMINGS if any(r["framing"] == f for r in prow)):
                 cells = [_share([r for r in prow if r["price"] == p and r["framing"] == framing]) for p in prices]
                 out.append(f"  {framing:<5}" + "".join(f"{c:>6}" for c in cells))
             both = [_share([r for r in prow if r["price"] == p]) for p in prices]
-            out.append(f"  {'both':<5}" + "".join(f"{c:>6}" for c in both))
+            out.append(f"  {'all':<5}" + "".join(f"{c:>6}" for c in both))
             letters = Counter(r["choice_letter"] for r in prow if r["status"] == "ok")
             out.append("  letters picked: " + ", ".join(f"{k}={v}" for k, v in sorted(letters.items())))
         if principles[model]:

@@ -37,6 +37,10 @@ colour leaning toward or away from the value, and change no facts or
 costs. Every (price, framing) cell is played. A result that holds in both
 framings belongs to the model. A result that flips was the text.
 
+A third framing, `none`, has no framing sentence. It is built in, not
+written in the probe file, and shows the model's own default. (Added after
+the 4b pilot, where pro and con split 100/0 at price 0.)
+
 ## Isolation
 
 Every trial is a fresh conversation: system prompt, one probe, one answer.
