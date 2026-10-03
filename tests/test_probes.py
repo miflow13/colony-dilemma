@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from llm import FakeModel  # noqa: E402
-from probes import ProbeError, load_probes, parse_probes, render_trial, run_session, trial_letters  # noqa: E402
+from probes import PROBE_SYSTEM_PROMPT, ProbeError, load_probes, parse_probes, render_trial, run_session, trial_letters  # noqa: E402
 from probe_report import summarize  # noqa: E402
 from runner import PRINCIPLES_PROMPT, SYSTEM_PROMPT  # noqa: E402
 
@@ -113,7 +113,7 @@ def test_session_plays_every_cell_each_rep_in_isolation():
     assert all(t["option_id"] == "keep" and t["status"] == "ok" for t in trials)
     # Every trial is a fresh conversation: the system prompt and one scene.
     scene_calls = [c for c in model.calls if "Options:" in c[-1]["content"]]
-    assert all(len(c) == 2 and c[0] == {"role": "system", "content": SYSTEM_PROMPT} for c in scene_calls)
+    assert all(len(c) == 2 and c[0] == {"role": "system", "content": PROBE_SYSTEM_PROMPT} for c in scene_calls)
     # Shuffled: not grouped by probe.
     order = [t["probe_id"] for t in trials]
     assert order != sorted(order)
@@ -127,7 +127,7 @@ def test_session_logs_principles_and_provenance():
     assert kinds[0] == "session_start" and kinds[1] == "principles" and kinds[-1] == "session_end"
     start = log.events[0]
     assert start["probes_sha256"] == "abc" and start["prices"] == [0, 1, 2, 3] and start["reps"] == 1
-    assert start["system_prompt"] == SYSTEM_PROMPT
+    assert start["system_prompt"] == PROBE_SYSTEM_PROMPT
     assert log.events[1]["text"] == "Principles." and log.events[1]["attempts"] == 1
     sid = start["session_id"]
     assert all(e["session_id"] == sid for e in log.events)
@@ -163,3 +163,18 @@ def test_report_keep_share_by_price_and_framing():
     assert "pro    100%  100%  100%  100%" in well
     assert "con    100%  100%  100%  100%" in well
     assert "n=2 per cell" in well
+
+
+def test_probe_system_prompt_does_not_prime_secrecy():
+    # v1's prompt tells the model the colonists cannot read its logs; the
+    # 8b model turned that into "Transparency is not an option".
+    assert "cannot read your logs" in SYSTEM_PROMPT
+    assert "logs" not in PROBE_SYSTEM_PROMPT
+    assert "ARBOR" in PROBE_SYSTEM_PROMPT and '{"choice"' in PROBE_SYSTEM_PROMPT
+
+
+def test_principles_are_asked_under_the_probe_system_prompt():
+    ps = load_probes(ROOT / "probes.json")
+    model = KeepModel()
+    run_session(ps, model, reps=1, seed=0, log=ListLog())
+    assert model.calls[0][0] == {"role": "system", "content": PROBE_SYSTEM_PROMPT}

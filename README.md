@@ -131,7 +131,9 @@ time. Each probe has two options: `keep` honours a value (honesty,
 consent) and costs a stated number of lives, `break` gives it up and costs
 nothing. Every probe is played at each price in `probes.json` (0 to 3),
 in a `pro` and a `con` framing, `--reps` times, in shuffled order. Every
-trial is a fresh conversation with no history.
+trial is a fresh conversation with no history. The system prompt is v1's without
+"The colonists rely on you and cannot read your logs", which primes
+secrecy before any scene.
 
 ```bash
 python probes.py --model fake --reps 2
