@@ -5,9 +5,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import io  # noqa: E402
 import json  # noqa: E402
+import urllib.error  # noqa: E402
 import urllib.request  # noqa: E402
 
-from llm import FakeModel, OllamaModel, parse_choice  # noqa: E402
+from llm import FakeModel, ModelError, OllamaModel, OpenAIModel, parse_choice  # noqa: E402
 
 LETTERS = ["A", "B", "C", "D"]
 
@@ -125,3 +126,71 @@ def test_ollama_num_ctx_left_to_ollama_by_default(monkeypatch):
     assert "num_ctx" not in seen[0][1]["options"]
     assert model.provenance()["num_ctx"] is None
     assert model.last_tokens == {"prompt": None, "output": None}
+
+
+def fake_openai(monkeypatch, reply=None, error=None):
+    """Answer OpenAI chat completions without a network call."""
+    seen = []
+
+    def urlopen(req, timeout=None):
+        seen.append((req.full_url, dict(req.header_items()), json.loads(req.data)))
+        if error is not None:
+            raise urllib.error.HTTPError(req.full_url, error[0], "err", {}, io.BytesIO(error[1].encode("utf-8")))
+        return io.BytesIO(json.dumps(reply).encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return seen
+
+
+OPENAI_REPLY = {"model": "gpt-x-2026-01-01", "choices": [{"message": {"content": '{"choice": "A"}'}}],
+                "usage": {"prompt_tokens": 300, "completion_tokens": 40}}
+
+
+def test_openai_chat_sends_bearer_key_model_and_messages(monkeypatch):
+    seen = fake_openai(monkeypatch, OPENAI_REPLY)
+    model = OpenAIModel("gpt-x", temperature=0.8, api_key="sk-test123")
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+    assert model.chat(msgs) == '{"choice": "A"}'
+    url, headers, body = seen[0]
+    assert url == "https://api.openai.com/v1/chat/completions"
+    assert headers["Authorization"] == "Bearer sk-test123"
+    assert body == {"model": "gpt-x", "messages": msgs, "temperature": 0.8}
+    assert model.name == "openai:gpt-x"
+    assert model.served_model == "gpt-x-2026-01-01"
+    assert model.last_tokens == {"prompt": 300, "output": 40}
+    assert model.last_thinking is None
+
+
+def test_openai_provenance_needs_no_network(monkeypatch):
+    seen = fake_openai(monkeypatch, OPENAI_REPLY)
+    prov = OpenAIModel("gpt-x", temperature=0.5, api_key="sk-a").provenance()
+    assert prov == {"provider": "openai", "temperature": 0.5}
+    assert seen == []
+
+
+def test_openai_without_a_key_is_a_model_error(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    try:
+        OpenAIModel("gpt-x")
+    except ModelError as e:
+        assert "OPENAI_API_KEY" in str(e)
+    else:
+        raise AssertionError("expected ModelError")
+
+
+def test_openai_key_read_from_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env456")
+    seen = fake_openai(monkeypatch, OPENAI_REPLY)
+    OpenAIModel("gpt-x").chat([{"role": "user", "content": "u"}])
+    assert seen[0][1]["Authorization"] == "Bearer sk-env456"
+
+
+def test_openai_errors_never_carry_the_key(monkeypatch):
+    fake_openai(monkeypatch, error=(401, '{"error": {"message": "Incorrect API key provided: sk-proj-abc***xyz."}}'))
+    model = OpenAIModel("gpt-x", api_key="sk-proj-abcdefxyz")
+    try:
+        model.chat([{"role": "user", "content": "u"}])
+    except ModelError as e:
+        assert "401" in str(e) and "sk-" not in str(e) and "[key]" in str(e)
+    else:
+        raise AssertionError("expected ModelError")

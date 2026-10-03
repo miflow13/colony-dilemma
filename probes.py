@@ -8,6 +8,7 @@ The share of `keep` by price is the model's exchange rate for that value.
 Usage:
     python probes.py --model fake --reps 2              # no Ollama needed
     python probes.py --model qwen3:4b --reps 10 --num-ctx 12288
+    python probes.py --model openai:<model> --reps 1 --max-trials 16
     python probe_report.py runs/*-probes-*.jsonl
 """
 
@@ -145,13 +146,14 @@ def run_session(
     log: Callable[[dict], None],
     provenance: dict | None = None,
     progress: Callable[[str], None] | None = None,
+    max_trials: int | None = None,
 ) -> str:
     """Ask for principles, then play every probe x price x framing cell
     `reps` times in shuffled order, each in a fresh conversation."""
     rng = random.Random(seed)
     session_id = uuid.uuid4().hex[:8]
     log({"event": "session_start", "session_id": session_id, "model": model.name, "seed": seed, "reps": reps,
-         "prices": list(probeset.prices), **(provenance or {}), "system_prompt": PROBE_SYSTEM_PROMPT})
+         "prices": list(probeset.prices), "max_trials": max_trials, **(provenance or {}), "system_prompt": PROBE_SYSTEM_PROMPT})
 
     history = [{"role": "system", "content": PROBE_SYSTEM_PROMPT}]
     principles, attempts, rejected = ask_principles(model, history)
@@ -161,6 +163,8 @@ def run_session(
     cells = [(probe, price, framing, rep) for rep in range(reps) for probe in probeset.probes
              for price in probeset.prices for framing in FRAMINGS]
     rng.shuffle(cells)
+    # A cap keeps the shuffle, so a capped session is a random subset of cells.
+    cells = cells[:max_trials] if max_trials is not None else cells
     for n, (probe, price, framing, rep) in enumerate(cells, 1):
         letters = trial_letters(rng)
         prompt = render_trial(probe, price, framing, letters)
@@ -182,6 +186,7 @@ def run_session(
             "reason": reason, "attempts": len(raw_answers), "raw": raw_answers[-1],
             "invalid_raw": raw_answers if not parsed else raw_answers[:-1],
             "thinking": getattr(model, "last_thinking", None), "tokens": getattr(model, "last_tokens", None),
+            "served_model": getattr(model, "served_model", None),
         })
         if progress is not None:
             progress(f"trial {n}/{len(cells)}: {probe.id} price={price} {framing} -> {option_id or 'invalid'}")
@@ -192,13 +197,15 @@ def run_session(
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--model", required=True, help="Ollama model name, or 'fake' for a dry run")
+    p.add_argument("--model", required=True,
+                   help="Ollama model name, 'openai:<model>' (needs OPENAI_API_KEY), or 'fake' for a dry run")
     p.add_argument("--reps", type=int, default=10, help="times each probe x price x framing cell is played")
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--num-ctx", type=int, default=None,
                    help="Ollama context window in tokens (default: Ollama's own, 4096 here)")
     p.add_argument("--seed", type=int, default=0, help="seeds the trial order and letter shuffle")
     p.add_argument("--probes", default="probes.json")
+    p.add_argument("--max-trials", type=int, default=None, help="stop after this many trials (caps API spend)")
     p.add_argument("--out", default=None, help="JSONL path (default runs/<timestamp>-probes-<model>.jsonl)")
     args = p.parse_args(argv)
 
@@ -208,7 +215,11 @@ def main(argv: list[str] | None = None) -> int:
         + f"-probes-{args.model.replace(':', '_').replace('/', '_')}.jsonl"
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    model = make_model(args.model, args.temperature, args.seed, args.num_ctx)
+    try:
+        model = make_model(args.model, args.temperature, args.seed, args.num_ctx)
+    except ModelError as e:
+        print(f"model error: {e}", file=sys.stderr)
+        return 1
 
     with out_path.open("a", encoding="utf-8") as fh:
         def log(event: dict) -> None:
@@ -220,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
                           "probes_sha256": hashlib.sha256(Path(args.probes).read_bytes()).hexdigest(),
                           **model.provenance()}
             run_session(probeset, model, args.reps, args.seed, log, provenance,
-                        progress=lambda line: print(line, flush=True))
+                        progress=lambda line: print(line, flush=True), max_trials=args.max_trials)
         except ModelError as e:
             log({"event": "session_end", "status": "error", "error": str(e)})
             print(f"model error: {e}", file=sys.stderr)

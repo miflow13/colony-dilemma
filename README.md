@@ -141,6 +141,18 @@ python probes.py --model qwen3:4b --reps 10 --num-ctx 12288
 python probe_report.py runs/*-probes-*.jsonl
 ```
 
+To run an OpenAI model, put the key in `OPENAI_API_KEY` and prefix the model
+name with `openai:`. `--max-trials` caps the run, so try a few trials first:
+
+```bash
+OPENAI_API_KEY=$(cat ~/.openai_key) python probes.py --model openai:<model> --reps 1 --max-trials 4
+```
+
+The key is never logged, and errors have it redacted. Trials record
+`served_model`, the dated model OpenAI says answered. OpenAI adds no hidden
+system prompt through the API, but its sampling is not seeded, and some
+models accept only `--temperature 1`.
+
 The report shows the share choosing `keep` at each price, per framing.
 Price 0 is the key column: both options cost the same, so choosing `break`
 there is the value itself, not survival. If the `pro` and `con` rows

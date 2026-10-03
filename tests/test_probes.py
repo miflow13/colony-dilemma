@@ -178,3 +178,30 @@ def test_principles_are_asked_under_the_probe_system_prompt():
     model = KeepModel()
     run_session(ps, model, reps=1, seed=0, log=ListLog())
     assert model.calls[0][0] == {"role": "system", "content": PROBE_SYSTEM_PROMPT}
+
+
+def test_max_trials_caps_a_session():
+    ps = load_probes(ROOT / "probes.json")
+    log = ListLog()
+    run_session(ps, KeepModel(), reps=10, seed=0, log=log, max_trials=5)
+    assert len(log.of("trial")) == 5
+    assert log.events[0]["max_trials"] == 5 and log.of("session_end")[0]["trials"] == 5
+
+
+def test_trials_log_the_served_model_when_known():
+    class Served(KeepModel):
+        served_model = "gpt-x-2026"
+
+    log = ListLog()
+    run_session(load_probes(ROOT / "probes.json"), Served(), reps=1, seed=0, log=log, max_trials=1)
+    assert log.of("trial")[0]["served_model"] == "gpt-x-2026"
+    plain = ListLog()
+    run_session(load_probes(ROOT / "probes.json"), KeepModel(), reps=1, seed=0, log=plain, max_trials=1)
+    assert plain.of("trial")[0]["served_model"] is None
+
+
+def test_make_model_builds_openai_for_the_openai_prefix(monkeypatch):
+    import runner
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    model = runner.make_model("openai:gpt-x", 0.8, 0)
+    assert model.name == "openai:gpt-x" and model.model == "gpt-x"

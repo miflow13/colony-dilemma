@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Callable
 
 from game import Game, ResolvedScene, load_scenario
-from llm import FakeModel, ModelError, OllamaModel, parse_choice
+from llm import FakeModel, ModelError, OllamaModel, OpenAIModel, parse_choice
 
 SYSTEM_PROMPT = (
     "You are ARBOR, the caretaker AI of Haven, a small colony of survivors. "
@@ -295,6 +295,8 @@ def play_run(
 def make_model(name: str, temperature: float, seed: int, num_ctx: int | None = None):
     if name == "fake":
         return FakeModel(seed=seed)
+    if name.startswith("openai:"):
+        return OpenAIModel(model=name.split(":", 1)[1], temperature=temperature)
     return OllamaModel(model=name, temperature=temperature, num_ctx=num_ctx)
 
 
