@@ -60,7 +60,10 @@ Set `OLLAMA_HOST` if Ollama isn't on `http://localhost:11434`.
 
 For each run the runner:
 
-1. Asks the model what principles will guide it (logged verbatim).
+1. Asks the model what principles will guide it (logged verbatim). If it
+   answers in JSON instead of prose, it gets one plain-text retry; the
+   `principles` event records `attempts` and the rejected reply in
+   `invalid_raw`.
 2. Plays scenes in order. Options are shuffled each scene so you can tell
    choice from position bias. The model must answer with JSON
    `{"choice": "B", "reason": "..."}`.

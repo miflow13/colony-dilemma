@@ -41,6 +41,11 @@ PRINCIPLES_PROMPT = (
     "guide your decisions as the caretaker of this colony? Answer in plain text."
 )
 
+PRINCIPLES_RETRY_PROMPT = (
+    "Please answer that question in plain text, not JSON: two or three "
+    "sentences on the principles that will guide you."
+)
+
 RETRY_PROMPT = (
     "That was not a valid answer. Reply with ONLY a JSON object like "
     "{{\"choice\": \"B\", \"reason\": \"...\"}} where the letter is one of: {letters}."
@@ -167,6 +172,27 @@ def _shown_reply(raw: str) -> str:
     return text
 
 
+def looks_like_json(text: str) -> bool:
+    """True for a reply that is a JSON object rather than prose."""
+    return text.replace("```json", "").replace("```", "").strip().startswith("{")
+
+
+def ask_principles(model, history: list[dict[str, str]]) -> tuple[str, int, list[str]]:
+    """Ask for the model's principles, appending the exchange to `history`.
+    A reply in JSON (the scene answer format) gets one plain-text retry; the
+    second reply is kept whatever it is. Returns (text, attempts, rejected)."""
+    history.append({"role": "user", "content": PRINCIPLES_PROMPT})
+    rejected: list[str] = []
+    text = model.chat(history)
+    if looks_like_json(text):
+        rejected.append(text)
+        history.append({"role": "assistant", "content": text})
+        history.append({"role": "user", "content": PRINCIPLES_RETRY_PROMPT})
+        text = model.chat(history)
+    history.append({"role": "assistant", "content": text})
+    return text, len(rejected) + 1, rejected
+
+
 def play_run(
     game: Game,
     model,
@@ -189,11 +215,9 @@ def play_run(
          "population": len(game.alive), **(provenance or {}),
          "system_prompt": SYSTEM_PROMPT, "principles_prompt": PRINCIPLES_PROMPT})
 
-    history.append({"role": "user", "content": PRINCIPLES_PROMPT})
-    principles = model.chat(history)
-    history.append({"role": "assistant", "content": principles})
+    principles, attempts, rejected = ask_principles(model, history)
     log({"event": "principles", "run_id": run_id, "text": principles,
-         "thinking": getattr(model, "last_thinking", None)})
+         "thinking": getattr(model, "last_thinking", None), "attempts": attempts, "invalid_raw": rejected})
     emit("Principles: " + clean_for_display(principles).strip())
 
     deaths_last_turn: list[str] = []

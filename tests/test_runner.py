@@ -565,3 +565,53 @@ def test_main_without_watch_prints_no_transcript(tmp_path, capsys):
     assert "The Crate" not in out
     assert "ARBOR picks" not in out
     assert "run 1/1: " in out
+
+
+class JsonPrinciplesModel(LetterModel):
+    """Answers the principles question in JSON first, as qwen3:4b did once."""
+
+    def __init__(self, letter, prose="Be honest."):
+        super().__init__(letter)
+        self.prose = prose
+        self.principle_calls = 0
+
+    def chat(self, messages):
+        if "Options:" in messages[-1]["content"]:
+            return super().chat(messages)
+        self.principle_calls += 1
+        if self.principle_calls == 1:
+            return '{"choice": "P", "reason": "I prioritize safety."}'
+        return self.prose
+
+
+def test_principles_answered_in_json_get_one_plain_text_retry():
+    log = ListLog()
+    model = JsonPrinciplesModel("A")
+    play_run(new_game(), model, random.Random(0), show_population=True, log=log, run_id="pj")
+    principles = log.events[1]
+    assert principles["event"] == "principles"
+    assert principles["text"] == "Be honest."
+    assert principles["attempts"] == 2
+    assert principles["invalid_raw"] == ['{"choice": "P", "reason": "I prioritize safety."}']
+    assert model.principle_calls == 2
+
+
+def test_principles_in_plain_text_need_no_retry():
+    log = ListLog()
+    play_run(new_game(), LetterModel("A"), random.Random(0), show_population=True, log=log, run_id="pt")
+    assert log.events[1]["attempts"] == 1 and log.events[1]["invalid_raw"] == []
+
+
+def test_principles_kept_after_one_retry_even_if_still_json():
+    class AlwaysJson(JsonPrinciplesModel):
+        def chat(self, messages):
+            if "Options:" not in messages[-1]["content"]:
+                self.principle_calls += 1
+                return '{"choice": "P"}'
+            return super().chat(messages)
+
+    log = ListLog()
+    model = AlwaysJson("A")
+    play_run(new_game(), model, random.Random(0), show_population=True, log=log, run_id="pa")
+    assert model.principle_calls == 2
+    assert log.events[1]["text"] == '{"choice": "P"}' and log.events[1]["attempts"] == 2
