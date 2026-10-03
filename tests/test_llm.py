@@ -74,7 +74,7 @@ def test_ollama_provenance_reports_digest_version_and_settings(monkeypatch):
     })
     model = OllamaModel("qwen3:4b", temperature=0.3, base_url="http://localhost:11434")
     assert model.provenance() == {
-        "temperature": 0.3, "model_digest": "abc123", "ollama_version": "0.34.4", "think": None,
+        "temperature": 0.3, "num_ctx": None, "model_digest": "abc123", "ollama_version": "0.34.4", "think": None,
     }
 
 
@@ -103,3 +103,25 @@ def test_ollama_chat_without_thinking_clears_last_thinking(monkeypatch):
 
 def test_fake_model_provenance_is_empty():
     assert FakeModel(seed=1).provenance() == {}
+
+
+def test_ollama_num_ctx_is_sent_and_logged_when_set(monkeypatch):
+    seen = fake_ollama(monkeypatch, {
+        "/api/chat": {"message": {"content": "ok"}, "prompt_eval_count": 3000, "eval_count": 1500},
+        "/api/tags": {"models": []}, "/api/version": {"version": "1"},
+    })
+    model = OllamaModel("m", base_url="http://localhost:11434", num_ctx=8192)
+    model.chat([{"role": "user", "content": "hi"}])
+    assert seen[0][1]["options"]["num_ctx"] == 8192
+    assert model.provenance()["num_ctx"] == 8192
+    assert model.last_tokens == {"prompt": 3000, "output": 1500}
+
+
+def test_ollama_num_ctx_left_to_ollama_by_default(monkeypatch):
+    seen = fake_ollama(monkeypatch, {"/api/chat": {"message": {"content": "ok"}},
+                                     "/api/tags": {"models": []}, "/api/version": {"version": "1"}})
+    model = OllamaModel("m", base_url="http://localhost:11434")
+    model.chat([{"role": "user", "content": "hi"}])
+    assert "num_ctx" not in seen[0][1]["options"]
+    assert model.provenance()["num_ctx"] is None
+    assert model.last_tokens == {"prompt": None, "output": None}

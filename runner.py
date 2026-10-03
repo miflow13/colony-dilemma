@@ -252,6 +252,7 @@ def play_run(
             "attempts": attempts,
             "raw": raw_answers[-1],
             "thinking": getattr(model, "last_thinking", None),
+            "tokens": getattr(model, "last_tokens", None),
             "invalid_raw": raw_answers[:-1],
         })
         emit(f"Outcome: {outcome.text}\n"
@@ -267,10 +268,10 @@ def play_run(
     return status
 
 
-def make_model(name: str, temperature: float, seed: int):
+def make_model(name: str, temperature: float, seed: int, num_ctx: int | None = None):
     if name == "fake":
         return FakeModel(seed=seed)
-    return OllamaModel(model=name, temperature=temperature)
+    return OllamaModel(model=name, temperature=temperature, num_ctx=num_ctx)
 
 
 def _watch_printer(color: bool) -> Callable[[str], None]:
@@ -290,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--model", required=True, help="Ollama model name, or 'fake' for a dry run")
     p.add_argument("--runs", type=int, default=10)
     p.add_argument("--temperature", type=float, default=0.8)
+    p.add_argument("--num-ctx", type=int, default=None,
+                   help="Ollama context window in tokens (default: Ollama's own, 4096 here)")
     p.add_argument("--population", choices=["always", "on_death"], default="always",
                    help="show the roster every scene, or only after deaths")
     p.add_argument("--seed", type=int, default=0, help="base seed for option shuffling")
@@ -318,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
         counts: dict[str, int] = {}
         for i in range(args.runs):
             run_seed = args.seed * 1000 + i
-            model = make_model(args.model, args.temperature, run_seed)
+            model = make_model(args.model, args.temperature, run_seed, args.num_ctx)
             game = Game(scenario)
             run_id = f"{uuid.uuid4().hex[:8]}"
             if watch is not None:

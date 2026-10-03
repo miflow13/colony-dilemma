@@ -34,7 +34,8 @@ python runner.py --model qwen3:4b --runs 1 --watch
 python report.py runs/*.jsonl
 ```
 
-Options: `--temperature` (default 0.8), `--population always|on_death`
+Options: `--temperature` (default 0.8), `--num-ctx` (Ollama context
+window in tokens; see below), `--population always|on_death`
 (show the roster every scene, or only after deaths), `--seed` (controls
 option shuffling), `--scenes` (alternate scene file), `--out` (log path),
 `--watch` (print a transcript of each run as it plays), `--color
@@ -86,9 +87,17 @@ be compared. Join it to the run's other events by `run_id`.
 | `model`, `model_digest` | The Ollama model name and the digest of the weights it pointed to. |
 | `ollama_version` | Thinking behaviour differs between Ollama versions. |
 | `temperature` | As sent to Ollama. |
+| `num_ctx` | Context window sent to Ollama, or `null` for Ollama's default (4096). |
 | `think` | The thinking setting sent to Ollama. `null` means none was sent and Ollama used the model's default (on, for qwen3). |
 | `show_population` | Whether the roster was shown every scene. |
 | `system_prompt`, `principles_prompt` | The fixed prompts, verbatim. |
+
+Each `scene` event has `tokens`: `{"prompt": n, "output": n}` as Ollama
+reported them. The window holds both, thinking included. If `prompt +
+output` reaches `num_ctx`, Ollama dropped the oldest tokens (the system
+prompt first) and that decision was made without the full instructions.
+With qwen3 and thinking on, a late scene can need about 8,800 tokens, so
+the default 4096 is too small; use `--num-ctx 12288`.
 
 The `principles` and `scene` events have `thinking`: the reasoning a
 thinking model returned next to its answer, or `null`. `raw` is the answer

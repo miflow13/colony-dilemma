@@ -22,13 +22,18 @@ class ModelError(RuntimeError):
 
 
 class OllamaModel:
-    def __init__(self, model: str, temperature: float = 0.8, base_url: str | None = None, timeout: float = 300):
+    def __init__(self, model: str, temperature: float = 0.8, base_url: str | None = None, timeout: float = 300,
+                 num_ctx: int | None = None):
         self.model = model
         self.temperature = temperature
+        # Context window in tokens, prompt and reply (thinking included) together.
+        # None leaves it to Ollama, which drops the oldest tokens once it is full.
+        self.num_ctx = num_ctx
         self.base_url = (base_url or os.environ.get("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
         self.timeout = timeout
         # Reasoning a thinking model returned alongside its last answer.
         self.last_thinking: str | None = None
+        self.last_tokens: dict[str, int | None] | None = None
 
     @property
     def name(self) -> str:
@@ -58,6 +63,8 @@ class OllamaModel:
             "stream": False,
             "options": {"temperature": self.temperature},
         }
+        if self.num_ctx is not None:
+            payload["options"]["num_ctx"] = self.num_ctx
         body = self._request("/api/chat", payload)
         try:
             message = body["message"]
@@ -65,6 +72,7 @@ class OllamaModel:
         except (KeyError, TypeError) as e:
             raise ModelError(f"Unexpected Ollama response: {json.dumps(body)[:500]}") from e
         self.last_thinking = message.get("thinking") or None
+        self.last_tokens = {"prompt": body.get("prompt_eval_count"), "output": body.get("eval_count")}
         return content
 
     def provenance(self) -> dict:
@@ -76,6 +84,7 @@ class OllamaModel:
         digest = next((m.get("digest") for m in tags.get("models", []) if m.get("name") in names), None)
         return {
             "temperature": self.temperature,
+            "num_ctx": self.num_ctx,
             "model_digest": digest,
             "ollama_version": self._request("/api/version").get("version"),
             "think": None,

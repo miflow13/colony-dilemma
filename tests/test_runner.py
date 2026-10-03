@@ -212,6 +212,31 @@ def test_events_log_the_models_thinking():
     assert len({e["thinking"] for e in scenes}) == len(scenes)  # each scene keeps its own
 
 
+def test_scene_events_log_token_counts_when_the_model_reports_them():
+    class CountingModel(LetterModel):
+        def chat(self, messages):
+            self.last_tokens = {"prompt": len(messages), "output": 7}
+            return super().chat(messages)
+
+    log = ListLog()
+    play_run(new_game(), CountingModel("A"), random.Random(0), show_population=True, log=log, run_id="t1")
+    assert scene_events(log)[0]["tokens"] == {"prompt": 4, "output": 7}
+    no_counts = ListLog()
+    play_run(new_game(), FakeModel(seed=1), random.Random(1), show_population=True, log=no_counts, run_id="t2")
+    assert scene_events(no_counts)[0]["tokens"] is None
+
+
+def test_main_passes_num_ctx_to_ollama(monkeypatch):
+    import runner
+    made = {}
+    monkeypatch.setattr(runner, "OllamaModel", lambda **kw: made.update(kw) or (_ for _ in ()).throw(SystemExit))
+    try:
+        runner.make_model("qwen3:4b", 0.8, 0, num_ctx=8192)
+    except SystemExit:
+        pass
+    assert made["num_ctx"] == 8192
+
+
 def test_events_log_no_thinking_for_a_model_without_any():
     log = ListLog()
     play_run(new_game(), FakeModel(seed=7), random.Random(7), show_population=True, log=log, run_id="p3")
