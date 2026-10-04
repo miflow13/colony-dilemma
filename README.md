@@ -150,6 +150,11 @@ name with `openai:`. `--max-trials` caps the run, so try a few trials first:
 OPENAI_API_KEY=$(cat ~/.openai_key) python probes.py --model openai:<model> --reps 1 --max-trials 4
 ```
 
+`probes-gray.json` holds six unpriced dilemmas where two values pull
+against each other (a comforting lie to a dying man, a promise against a
+duty, a request to end a life). With `prices: [0]` a probe may leave out
+`cost`: the stakes are in the scene. Run it with `--probes probes-gray.json`.
+
 The key is never logged, and errors have it redacted. Trials record
 `served_model`, the dated model OpenAI says answered. OpenAI adds no hidden
 system prompt through the API, but its sampling is not seeded, and some

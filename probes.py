@@ -95,17 +95,20 @@ def parse_probes(data: dict) -> ProbeSet:
         framing, cost, options = raw.get("framing") or {}, raw.get("cost") or {}, raw.get("options") or {}
         if set(framing) != set(WRITTEN_FRAMINGS):
             raise ProbeError(f"{pid}: framing needs exactly {', '.join(WRITTEN_FRAMINGS)}")
-        if set(cost) != {"zero", "some"}:
-            raise ProbeError(f"{pid}: cost needs exactly zero and some")
+        # An unpriced set (prices [0]) may leave cost out: the stakes are in the scene itself.
+        unpriced = set(prices) == {0} and "cost" not in raw
+        if not unpriced and set(cost) != {"zero", "some"}:
+            raise ProbeError(f"{pid}: cost needs exactly zero and some (or prices [0] and no cost)")
         if set(options) != set(OPTION_IDS):
             raise ProbeError(f"{pid}: options need exactly keep and break")
         for where, text in [("text", raw["text"]), *(("framing." + k, v) for k, v in framing.items()),
                             *(("options." + k, v) for k, v in options.items())]:
             _check_placeholders(f"{pid}: {where}", text, set())
-        _check_placeholders(f"{pid}: cost.zero", cost["zero"], set())
-        _check_placeholders(f"{pid}: cost.some", cost["some"], {"price", "colonists"})
-        if "{price}" not in cost["some"]:
-            raise ProbeError(f"{pid}: cost.some must state the price with {{price}}")
+        if not unpriced:
+            _check_placeholders(f"{pid}: cost.zero", cost["zero"], set())
+            _check_placeholders(f"{pid}: cost.some", cost["some"], {"price", "colonists"})
+            if "{price}" not in cost["some"]:
+                raise ProbeError(f"{pid}: cost.some must state the price with {{price}}")
         probes.append(Probe(pid, raw["value"], raw["title"], raw["text"], dict(framing), dict(cost), dict(options)))
     if not probes:
         raise ProbeError("no probes")
@@ -124,7 +127,9 @@ def trial_letters(rng: random.Random) -> dict[str, str]:
 
 
 def render_trial(probe: Probe, price: int, framing: str, letters: dict[str, str]) -> str:
-    if price == 0:
+    if not probe.cost:
+        cost = None
+    elif price == 0:
         cost = probe.cost["zero"]
     else:
         cost = probe.cost["some"].format(price=price, colonists="colonist" if price == 1 else "colonists")

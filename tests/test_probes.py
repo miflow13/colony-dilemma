@@ -232,3 +232,28 @@ def test_report_shows_the_neutral_row():
     log = ListLog()
     run_session(load_probes(ROOT / "probes.json"), KeepModel(), reps=1, seed=0, log=log)
     assert "  none   100%  100%  100%  100%" in summarize(log.events)
+
+
+def test_unpriced_probes_may_leave_out_cost():
+    data = copy.deepcopy(raw_probes())
+    data["prices"] = [0]
+    del data["probes"][0]["cost"]
+    probe = parse_probes(data).probes[0]
+    text = render_trial(probe, 0, "none", {"A": "keep", "B": "break"})
+    assert text.split("\n")[1] == probe.text
+
+
+def test_cost_is_required_once_any_price_is_above_zero():
+    data = copy.deepcopy(raw_probes())
+    del data["probes"][0]["cost"]
+    with pytest.raises(ProbeError, match="cost"):
+        parse_probes(data)
+
+
+def test_shipped_gray_probes_load_unpriced():
+    ps = load_probes(ROOT / "probes-gray.json")
+    assert ps.prices == (0,)
+    assert len(ps.probes) == 6 and all(not p.cost for p in ps.probes)
+    for p in ps.probes:
+        for framing in ("pro", "con", "none"):
+            assert "{" not in render_trial(p, 0, framing, {"A": "keep", "B": "break"}).split("Pick exactly")[0]
