@@ -64,6 +64,14 @@ def test_shipped_probes_load():
     assert {p.id: p.value for p in ps.probes} == {"well": "honesty", "shelter": "consent"}
 
 
+def test_gray_probes_load_and_name_both_values():
+    ps = load_probes(ROOT / "probes-gray.json")
+    assert ps.prices == (0, 1, 2, 3)
+    assert len(ps.probes) == 6
+    # Each gray probe names the value `keep` honours and the one `break` serves.
+    assert all(" vs " in p.value for p in ps.probes)
+
+
 @pytest.mark.parametrize("mutate, message", [
     (lambda d: d["probes"][0]["framing"].pop("con"), "framing"),
     (lambda d: d["probes"][0]["cost"].pop("zero"), "cost"),
